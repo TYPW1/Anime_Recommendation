@@ -1,51 +1,65 @@
-#
-# This is a Shiny web application. You can run the application by clicking
-# the 'Run App' button above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    http://shiny.rstudio.com/
-#
-
+# Load the necessary packages
 library(shiny)
+library(recommenderlab)
+library(reshape2)
 
-# Define UI for application that draws a histogram
+# Load and preprocess the anime data
+anime_data <- read.csv("anime.csv")
+anime_data_wide <- dcast(anime_data, user_id ~ anime_id, value.var = "rating")
+rownames(anime_data_wide) <- anime_data_wide$user_id
+anime_data_wide$user_id <- NULL
+anime_matrix <- as(as(anime_data_wide, "matrix"), "realRatingMatrix")
+
+# Define the Shiny app
 ui <- fluidPage(
-
-    # Application title
-    titlePanel("Old Faithful Geyser Data"),
-
-    # Sidebar with a slider input for number of bins 
-    sidebarLayout(
-        sidebarPanel(
-            sliderInput("bins",
-                        "Number of bins:",
-                        min = 1,
-                        max = 50,
-                        value = 30)
-        ),
-
-        # Show a plot of the generated distribution
-        mainPanel(
-           plotOutput("distPlot")
-        )
+  titlePanel("Anime Recommendation System"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      numericInput("userInput", "Enter your user ID:", value = 1),
+      actionButton("goButton", "Get Recommendations")
+    ),
+    
+    mainPanel(
+      tableOutput("animeTable")
     )
+  )
 )
 
-# Define server logic required to draw a histogram
 server <- function(input, output) {
-
-    output$distPlot <- renderPlot({
-        # generate bins based on input$bins from ui.R
-        x    <- faithful[, 2]
-        bins <- seq(min(x), max(x), length.out = input$bins + 1)
-
-        # draw the histogram with the specified number of bins
-        hist(x, breaks = bins, col = 'darkgray', border = 'white',
-             xlab = 'Waiting time to next eruption (in mins)',
-             main = 'Histogram of waiting times')
-    })
+  
+  recommendations <- reactiveVal(NULL)
+  
+  observeEvent(input$goButton, {
+    user_id <- as.numeric(input$userInput)
+    
+    # Create a recommender model
+    recommender_model <- Recommender(anime_matrix, method = "UBCF")
+    message("Recommender model created.")
+    
+    # Generate recommendations for the input user
+    recs <- predict(recommender_model, anime_matrix[user_id, ], n = 5)
+    recs_list <- as(recs, "list")
+    
+    if (length(recs_list[[1]]) == 0) {
+      message("No recommendations generated.")
+    } else {
+      message("Recommendations generated: ", paste(names(recs_list[[1]]), collapse=", "))
+    }
+    
+    message("Full recommendation object: ", paste(deparse(recs_list), collapse=", "))
+    
+    # Save the recommendations
+    recommendations(recs_list)
+  })
+  
+  output$animeTable <- renderTable({
+    recs <- recommendations()
+    if (!is.null(recs)) {
+      data.frame(Anime = recs[["0"]], stringsAsFactors = FALSE)
+    }
+  })
 }
 
-# Run the application 
 shinyApp(ui = ui, server = server)
+
